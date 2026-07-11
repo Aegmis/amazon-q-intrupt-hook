@@ -1,0 +1,19 @@
+{
+  "name": "intrupt",
+  "description": "Default agent with an intrupt human-approval gate on high-risk tools (execute_bash, fs_write). Run with: q chat --agent intrupt",
+  "tools": ["*"],
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "execute_bash",
+        "command": "python3 ~/.aws/amazonq/hooks/intrupt_hook.py",
+        "timeout_ms": 630000
+      },
+      {
+        "matcher": "fs_write",
+        "command": "python3 ~/.aws/amazonq/hooks/intrupt_hook.py",
+        "timeout_ms": 630000
+      }
+    ]
+  }
+}
