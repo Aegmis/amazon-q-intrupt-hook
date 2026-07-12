@@ -58,6 +58,8 @@ BASE_URL       = os.environ.get("AEGMIS_BASE_URL", "https://api.aegmis.com").rst
 API_KEY        = os.environ.get("AEGMIS_API_KEY", "")
 TIMEOUT        = int(os.environ.get("AEGMIS_TIMEOUT", "600"))
 POLL_INTERVAL  = int(os.environ.get("AEGMIS_POLL_INTERVAL", "5"))
+# Approval delivery channel: "slack" (default) or "email".
+CHANNEL        = os.environ.get("AEGMIS_CHANNEL", "slack")
 FORWARD_ALL    = os.environ.get("AEGMIS_FORWARD_ALL", "true").lower() in ("1", "true", "yes")
 
 # Kill switch: AEGMIS_APPROVAL=false disables the gate entirely (allow all).
@@ -127,11 +129,29 @@ for _pp in os.environ.get("AEGMIS_PROTECTED_PATHS", "").split(","):
     else:
         _PROTECTED_LITERAL.append(os.path.normpath(os.path.expanduser(_pp.rstrip("/"))))
 
+# Hard-blocked paths (AEGMIS_BLOCKED_PATHS) — same syntax as AEGMIS_PROTECTED_PATHS
+# (literal dir + subtree, or "re:" regex), but an `rm` hitting one is DENIED locally
+# with no approval round-trip. Local mode only (mirrors the protected-path gate).
+_BLOCKED_LITERAL = []
+_BLOCKED_REGEX = []
+for _pp in os.environ.get("AEGMIS_BLOCKED_PATHS", "").split(","):
+    _pp = _pp.strip()
+    if not _pp:
+        continue
+    if _pp.startswith("re:"):
+        try:
+            _BLOCKED_REGEX.append(re.compile(_pp[3:]))
+        except re.error as _exc:
+            print(f"[intrupt hook] ignoring invalid AEGMIS_BLOCKED_PATHS regex {_pp[3:]!r}: {_exc}",
+                  file=sys.stderr)
+    else:
+        _BLOCKED_LITERAL.append(os.path.normpath(os.path.expanduser(_pp.rstrip("/"))))
 
-def _rm_hits_protected(command: str) -> bool:
-    """True if an rm target (resolved against cwd) matches a protected literal path
-    (dir + subtree) or a protected `re:` regex (against the resolved absolute path)."""
-    if (not _PROTECTED_LITERAL and not _PROTECTED_REGEX) or not re.search(r"\brm\b", command):
+
+def _rm_hits(command: str, literals: list, regexes: list) -> bool:
+    """True if an rm target (resolved against cwd) matches a literal path
+    (dir + subtree) or a `re:` regex (against the resolved absolute path)."""
+    if (not literals and not regexes) or not re.search(r"\brm\b", command):
         return False
     for tok in command.split():
         t = tok.strip("'\"")
@@ -140,13 +160,23 @@ def _rm_hits_protected(command: str) -> bool:
         t = os.path.expanduser(t)
         cand = t if os.path.isabs(t) else os.path.normpath(os.path.join(_STATE["cwd"] or ".", t))
         cand = os.path.normpath(cand).rstrip("/")
-        for prot in _PROTECTED_LITERAL:
+        for prot in literals:
             if cand == prot or cand.startswith(prot + "/"):
                 return True
-        for _rx in _PROTECTED_REGEX:
+        for _rx in regexes:
             if _rx.search(cand):
                 return True
     return False
+
+
+def _rm_hits_protected(command: str) -> bool:
+    """True if an rm target matches a protected literal path or `re:` regex."""
+    return _rm_hits(command, _PROTECTED_LITERAL, _PROTECTED_REGEX)
+
+
+def _rm_hits_blocked(command: str) -> bool:
+    """True if an rm target matches a hard-blocked literal path or `re:` regex."""
+    return _rm_hits(command, _BLOCKED_LITERAL, _BLOCKED_REGEX)
 
 
 _BYPASS_RAW = os.environ.get("AEGMIS_BYPASS_PATTERNS", "")
@@ -262,6 +292,9 @@ def main() -> None:
             if _bypassed(command):
                 _allow()
         else:
+            if _rm_hits_blocked(command):
+                _block("Deletion of a hard-blocked path is denied "
+                       "(AEGMIS_BLOCKED_PATHS) — not sent for approval.")
             if not _should_gate_shell(command):
                 _allow()
         action  = "bash_command"
@@ -294,7 +327,7 @@ def main() -> None:
         "thread_id":   thread_id,
         "action":      action,
         "message":     message,
-        "channel":     "slack",
+        "channel":     CHANNEL,
         "tool_name":   tool_name,
         "tool_kwargs": tool_input,
         "adapter":     "amazon_q",

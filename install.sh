@@ -64,8 +64,10 @@ export AEGMIS_APPROVAL=true            # set false to disable the gate entirely
 export AEGMIS_FORWARD_ALL=false        # local mode: the hook decides (no server round-trip)
 export AEGMIS_GATED_TOOLS=execute_bash   # gate shell only (not fs_write)
 export AEGMIS_PROTECTED_PATHS="re:^$HOME$"  # gate rm of the home dir ITSELF (not its contents)
+# export AEGMIS_BLOCKED_PATHS="re:^$HOME$"  # HARD-DENY these targets locally (denied instantly, never asks); opt-in
 export AEGMIS_TIMEOUT=600
 export AEGMIS_POLL_INTERVAL=5
+export AEGMIS_CHANNEL=slack           # approval delivery channel: slack | email
 EOF
   echo ""
   echo "   Edit $ENV_FILE and fill in your AEGMIS_API_KEY."

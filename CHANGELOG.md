@@ -3,6 +3,24 @@
 All notable changes to `amazon-q-intrupt-hook` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com); dates are ISO-8601.
 
+## [0.1.0-beta.1] - 2026-07-12
+
+### Added
+- `AEGMIS_BLOCKED_PATHS` — **hard local deny** for `rm`: a matching deletion is blocked
+  instantly with no approval round-trip (never sent to a human), a stronger sibling of
+  `AEGMIS_PROTECTED_PATHS`. Same syntax (literal dir + subtree, or `re:` regex tested
+  against the resolved absolute target); **local mode only**, and checked *before* the
+  approval gate, so a hard block wins if a path is in both lists.
+- `AEGMIS_CHANNEL` — approval delivery channel: `slack` (default) or `email`.
+
+### Changed
+- Installer ships a commented `AEGMIS_BLOCKED_PATHS` opt-in line and sets
+  `AEGMIS_CHANNEL=slack` in the env template.
+- README substantially expanded: a **Quick start**, a **What gets gated** two-tier
+  reference (hard-block vs approval, plus the 20 built-in risk patterns), a two-branch
+  flow diagram (local deny vs Slack approval), and a **Guarding your paths** section
+  with minimal steps and `AEGMIS_PROTECTED_PATHS` / `AEGMIS_BLOCKED_PATHS` examples.
+
 ## [0.0.1-beta.2] - 2026-07-11
 
 ### Added

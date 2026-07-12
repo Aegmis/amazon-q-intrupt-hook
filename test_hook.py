@@ -94,8 +94,41 @@ for desc, payload, expect_gated in CASES:
         if result.stderr:
             print(f"       stderr: {result.stderr.strip()}")
 
+# ── Hard-block (AEGMIS_BLOCKED_PATHS) — deny locally, no approval round-trip ──────
+# A hard-blocked rm must block via exit 2 (fail-OPEN Q only honors exit 2) with a
+# STDERR reason naming AEGMIS_BLOCKED_PATHS, WITHOUT ever contacting the (dead) API.
+HARD_ENV = {**TEST_ENV, "AEGMIS_BLOCKED_PATHS": os.path.expanduser("~/keepsafe")}
+HARD_CASES = [
+    # (description, command, expect_hard_blocked)
+    ("execute_bash — rm of hard-blocked dir (denied locally)",    "rm -rf ~/keepsafe",         True),
+    ("execute_bash — rm of file under hard-blocked dir (denied)", "rm ~/keepsafe/secrets.txt", True),
+    ("execute_bash — rm elsewhere (not hard-blocked)",            "rm -rf ~/other/tmp",        False),
+]
+for desc, cmd, expect_blocked in HARD_CASES:
+    result = subprocess.run(
+        [sys.executable, HOOK],
+        input=json.dumps({"hook_event_name": "preToolUse", "cwd": os.path.expanduser("~"),
+                          "tool_name": "execute_bash", "tool_input": {"command": cmd}}),
+        capture_output=True, text=True, env=HARD_ENV,
+    )
+    hard_blocked = result.returncode == 2 and "AEGMIS_BLOCKED_PATHS" in result.stderr
+    valid_exit = result.returncode in (0, 2)  # anything else = Q would Allow (bug)
+    ok = valid_exit and (hard_blocked == expect_blocked)
+    status = "PASS" if ok else "FAIL"
+    if ok:
+        pass_count += 1
+    else:
+        fail_count += 1
+    print(f"[{status}] {desc}")
+    if not ok:
+        print(f"       expected hard_blocked={expect_blocked}, got exit={result.returncode}")
+        if not valid_exit:
+            print(f"       ⚠️  exit {result.returncode} is neither 0 nor 2 — Q would treat this as ALLOW!")
+        print(f"       stderr: {result.stderr.strip()!r}")
+
+total = len(CASES) + len(HARD_CASES)
 print()
-print(f"Results: {pass_count}/{len(CASES)} passed", end="")
+print(f"Results: {pass_count}/{total} passed", end="")
 if fail_count:
     print(f", {fail_count} failed")
     sys.exit(1)
