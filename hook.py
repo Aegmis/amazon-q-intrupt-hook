@@ -100,25 +100,38 @@ SHELL_GATE_PATTERNS: list[str] = [
 # User-defined protected paths (AEGMIS_PROTECTED_PATHS) — also gate `rm` of each
 # listed path and anything under it, on top of the built-in catastrophic targets.
 for _pp in os.environ.get("AEGMIS_PROTECTED_PATHS", "").split(","):
-    _pp = _pp.strip().rstrip("/")
-    if _pp:
-        SHELL_GATE_PATTERNS.append(r"\brm\b[\s\S]*\s" + re.escape(_pp) + r"(/|\s|$)")
+    _pp = _pp.strip()
+    if _pp and not _pp.startswith("re:"):   # literal entry -> raw-command fallback pattern
+        SHELL_GATE_PATTERNS.append(r"\brm\b[\s\S]*\s" + re.escape(_pp.rstrip("/")) + r"(/|\s|$)")
 
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in SHELL_GATE_PATTERNS]
 
 # Protected paths (AEGMIS_PROTECTED_PATHS) resolved for cwd-aware matching — this
 # catches relative rm targets (./ok, ok, ../x) that literal patterns would miss.
 _STATE = {"cwd": ""}
-_PROTECTED = [
-    __import__("os").path.normpath(__import__("os").path.expanduser(_pp.strip().rstrip("/")))
-    for _pp in os.environ.get("AEGMIS_PROTECTED_PATHS", "").split(",")
-    if _pp.strip()
-]
+# Each AEGMIS_PROTECTED_PATHS entry is a LITERAL dir (dir + everything under it) or,
+# when prefixed "re:", a REGEX tested against the resolved absolute rm target (anchor
+# with ^...$ to match a dir exactly; alternation / lookahead supported).
+_PROTECTED_LITERAL = []
+_PROTECTED_REGEX = []
+for _pp in os.environ.get("AEGMIS_PROTECTED_PATHS", "").split(","):
+    _pp = _pp.strip()
+    if not _pp:
+        continue
+    if _pp.startswith("re:"):
+        try:
+            _PROTECTED_REGEX.append(re.compile(_pp[3:]))
+        except re.error as _exc:
+            print(f"[intrupt hook] ignoring invalid AEGMIS_PROTECTED_PATHS regex {_pp[3:]!r}: {_exc}",
+                  file=sys.stderr)
+    else:
+        _PROTECTED_LITERAL.append(os.path.normpath(os.path.expanduser(_pp.rstrip("/"))))
 
 
 def _rm_hits_protected(command: str) -> bool:
-    """True if an rm target in `command`, resolved against cwd, is a protected path."""
-    if not _PROTECTED or not re.search(r"\brm\b", command):
+    """True if an rm target (resolved against cwd) matches a protected literal path
+    (dir + subtree) or a protected `re:` regex (against the resolved absolute path)."""
+    if (not _PROTECTED_LITERAL and not _PROTECTED_REGEX) or not re.search(r"\brm\b", command):
         return False
     for tok in command.split():
         t = tok.strip("'\"")
@@ -127,8 +140,11 @@ def _rm_hits_protected(command: str) -> bool:
         t = os.path.expanduser(t)
         cand = t if os.path.isabs(t) else os.path.normpath(os.path.join(_STATE["cwd"] or ".", t))
         cand = os.path.normpath(cand).rstrip("/")
-        for prot in _PROTECTED:
+        for prot in _PROTECTED_LITERAL:
             if cand == prot or cand.startswith(prot + "/"):
+                return True
+        for _rx in _PROTECTED_REGEX:
+            if _rx.search(cand):
                 return True
     return False
 
