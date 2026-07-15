@@ -277,6 +277,33 @@ def _rm_hits_blocked(command: str) -> bool:
     return _rm_hits(command, _BLOCKED_LITERAL, _BLOCKED_REGEX)
 
 
+# Write/create gate for AEGMIS_PROTECTED_PATHS — gate not just `rm` of a protected
+# path but also file CREATION / writes INTO it (touch, tee, cp/mv, `>`/`>>`
+# redirection). Scoped to protected dirs only, so writes elsewhere stay free.
+# Mirrors the rm-based protected-path gate.
+_WRITE_VERB = re.compile(r"\b(touch|tee|cp|mv|install|dd|ln)\b|>\s*\S|>>\s*\S")
+
+
+def _write_hits(command: str, literals: list, regexes: list) -> bool:
+    """True if a write/create verb targets a path under a literal dir (+subtree)
+    or a `re:` regex."""
+    if (not literals and not regexes) or not _WRITE_VERB.search(command):
+        return False
+    for t in _path_tokens(command):
+        cand = _resolve(t, _STATE["cwd"])
+        for prot in literals:
+            if cand == prot or cand.startswith(prot + "/"):
+                return True
+        for _rx in regexes:
+            if _rx.search(cand):
+                return True
+    return False
+
+
+def _write_hits_protected(command: str) -> bool:
+    return _write_hits(command, _PROTECTED_LITERAL, _PROTECTED_REGEX)
+
+
 def _rm_hits_workspace(command: str) -> bool:
     """True if a delete targets the whole project — the working dir itself or any
     ancestor of it (or filesystem root). Deleting a SUBDIR (rm -rf build) stays
@@ -430,6 +457,8 @@ def _should_gate_shell(command: str) -> tuple[bool, str]:
             continue
         if _rm_hits_protected(seg):
             return True, "protected-path"
+        if _write_hits_protected(seg):
+            return True, "protected-path (write)"
         for pattern in _COMPILED:
             if pattern.search(seg):
                 return True, pattern.pattern
